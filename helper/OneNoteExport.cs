@@ -77,7 +77,10 @@ public static class OneNoteExport
         string sectionId = EnsureSection(app, req.Section);
         string pageId = FindPage(app, sectionId, req.PageId ?? req.State?.PageId, req.Title) ?? NewPage(app, sectionId);
 
-        ClearPage(app, pageId);
+        // What a previous send put there goes once the new content is in, not before: if OneNote stops in
+        // between, the page has both (which the sync knows how to drop) instead of nothing, and a page with
+        // nothing on it read back as "all the ink was erased in OneNote".
+        var previous = PageObjects(app, pageId);
         var strokes = LoadInk(req.InkPath);
         if (req.WhiteInkToBlack) WhiteToBlack(strokes);
         double originX = Math.Min(req.ContentLeft, strokes.Count > 0 ? strokes.GetBounds().Left : req.ContentLeft);
@@ -121,6 +124,7 @@ public static class OneNoteExport
         page.Add(objects);
         var xml = new XDocument(page).ToString(SaveOptions.DisableFormatting);
         app.UpdatePageContent(xml, DateTime.MinValue, OneNote.Xs2013, false);
+        foreach (var id in previous) app.DeletePageContent(pageId, id, DateTime.MinValue, false);
         // Remember what the page looks like now, so later OneNote edits can be told apart and pulled.
         return OneNoteSync.Capture(app, pageId, written, originX, req.OriginY);
     }
@@ -178,13 +182,13 @@ public static class OneNoteExport
         return pageId;
     }
 
-    /// <summary>Remove what a previous send put on the page (outlines, ink), so re-sending replaces it.</summary>
-    static void ClearPage(IOneNoteApplication app, string pageId)
+    /// <summary>What's on the page now (outlines, ink; not the title): removed once a re-send has put the new content in.</summary>
+    static List<string> PageObjects(IOneNoteApplication app, string pageId)
     {
         app.GetPageContent(pageId, out var xml, 0, OneNote.Xs2013);
-        var doc = XDocument.Parse(xml);
-        foreach (var o in doc.Root!.Elements().Where(e => e.Name != one + "Title" && e.Attribute("objectID") != null).ToList())
-            app.DeletePageContent(pageId, o.Attribute("objectID")!.Value, DateTime.MinValue, false);
+        return XDocument.Parse(xml).Root!.Elements()
+            .Where(e => e.Name != one + "Title" && e.Attribute("objectID") != null)
+            .Select(e => e.Attribute("objectID")!.Value).ToList();
     }
 
     // ---------- Markdown block -> OneNote paragraphs ----------

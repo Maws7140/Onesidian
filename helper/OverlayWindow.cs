@@ -56,7 +56,6 @@ public sealed partial class OverlayWindow : Window
     bool announcedShown;
     Command? lastTool;
     (int x, int y, int w, int h) placed;
-    string? firstDownLogged;
 
     public OverlayWindow()
     {
@@ -113,15 +112,6 @@ public sealed partial class OverlayWindow : Window
             Dispatcher.BeginInvoke(DispatcherPriority.Input, () => { if (ink.Strokes.Contains(stroke)) ScratchOutBy(stroke); });
         };
 
-        // Once per file: where the first pen-down went, even if something handled it (for "the pen draws nothing").
-        AddHandler(StylusDownEvent, new StylusDownEventHandler((_, e) =>
-        {
-            if (inkPath == firstDownLogged) return;
-            firstDownLogged = inkPath;
-            var at = e.GetPosition(ink);
-            Protocol.Log($"pen down on {System.IO.Path.GetFileName(inkPath)} at ({at.X:0},{at.Y:0}) over {e.OriginalSource?.GetType().Name}, handled={e.Handled}, " +
-                $"mode={ink.EditingMode}, tool={currentTool}, tablet={e.StylusDevice.TabletDevice?.Name} ({e.StylusDevice.TabletDevice?.Type}), pen width {ink.DefaultDrawingAttributes.Width:0.###}");
-        }), handledEventsToo: true);
         PreviewStylusInAirMove += (_, _) => KeepArmed();
         PreviewStylusMove += (_, _) => KeepArmed();
         PreviewStylusDown += (_, _) => KeepArmed();
@@ -235,9 +225,57 @@ public sealed partial class OverlayWindow : Window
             case "replay-stop":
                 StopReplay();
                 break;
+            case "rename-ink":
+                RenameInk(cmd.From, cmd.To);
+                break;
             default:
                 HandleWriting(cmd);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// A note (or PDF, picture) was renamed or moved: its ink goes with it. `to` null: it was deleted, so its
+    /// ink is let go (the plugin trashes the file). Done here, where the ink is saved, so a save can't land
+    /// at the old path afterwards (renaming a folder used to bring the old folder back, with the ink in it).
+    /// </summary>
+    void RenameInk(string? from, string? to)
+    {
+        if (string.IsNullOrEmpty(from)) return;
+        bool loaded = string.Equals(inkPath, from, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            if (to == null)
+            {
+                if (!loaded) return;
+                // Deleted: nothing more to save for it.
+                dirty = false;
+                saveDebounce.Stop();
+                inkPath = null;
+                ink.Strokes = new StrokeCollection();
+                HookStrokes();
+                ResetHistory();
+                Protocol.Log($"ink let go: {Path.GetFileName(from)} (its file was deleted)");
+                return;
+            }
+            if (File.Exists(from) && File.Exists(to))
+            {
+                Protocol.Log($"ink not moved: {to} already exists (kept {from})");
+                return;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            if (File.Exists(from)) File.Move(from, to);
+            if (loaded)
+            {
+                // Saved where it lives now; the plugin's next layout names the new path and finds it loaded.
+                inkPath = to;
+                if (dirty) FlushSave();
+            }
+            Protocol.Log($"ink moved: {Path.GetFileName(from)} → {to}");
+        }
+        catch (Exception e)
+        {
+            Protocol.Log($"could not move ink {from} → {to}: {e.Message}");
         }
     }
 

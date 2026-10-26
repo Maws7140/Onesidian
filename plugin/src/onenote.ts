@@ -106,7 +106,10 @@ export function textColumn(view: MarkdownView, sizer: HTMLElement): { left: numb
  * in Obsidian can't be found and is skipped, never overwritten. Everything else is left byte-for-byte.
  */
 export function applyTextChanges(text: string, changes: TextChange[], state: SyncState): { text: string; skipped: number } {
-  const lines = text.split("\n");
+  // The note's own line endings (split on \n alone, a CRLF note's lines all ended in \r, matched no sent
+  // block, and every OneNote edit was skipped).
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(eol);
   const locate = (b: SyncBlock): [number, number] | null => {
     const want = b.text.split("\n");
     let best = -1;
@@ -145,7 +148,7 @@ export function applyTextChanges(text: string, changes: TextChange[], state: Syn
   // Bottom-up, so earlier positions stay valid.
   ops.sort((a, b) => b.at - a.at || b.order - a.order);
   for (const op of ops) lines.splice(op.at, op.del, ...op.insert);
-  return { text: lines.join("\n"), skipped };
+  return { text: lines.join(eol), skipped };
 }
 
 /** Shows what OneNote changed in the note's text and asks before applying it. */

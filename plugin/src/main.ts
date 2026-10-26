@@ -162,8 +162,14 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     // re-read by the helper after each save), and follow ink files that are renamed or deleted.
     await this.handwriting.load();
     this.app.workspace.onLayoutReady(() => window.setTimeout(() => this.indexStaleInk(), 5000));
-    this.registerEvent(this.app.vault.on("delete", (f) => this.handwriting.remove(f.path)));
-    this.registerEvent(this.app.vault.on("rename", (f, old) => this.handwriting.rename(old, f.path)));
+    this.registerEvent(this.app.vault.on("delete", (f) => {
+      this.handwriting.remove(f.path);
+      if (f instanceof TFile && f.extension !== "ink") this.inkFileGone(f);
+    }));
+    this.registerEvent(this.app.vault.on("rename", (f, old) => {
+      this.handwriting.rename(old, f.path);
+      if (f instanceof TFile && f.extension !== "ink") this.inkFileMoved(f, old);
+    }));
     this.registerEvent(this.app.vault.on("modify", (f) => {
       if (f instanceof TFile && f.extension === "ink" && f.path !== this.loadedInkPath()) this.queueIndex([f]);
     }));
@@ -178,6 +184,8 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       if (performance.now() - this.lastMissLog < 20_000) return;
       this.lastMissLog = performance.now();
       const el = e.target instanceof Element ? e.target : null;
+      // Menus and other plugins' toolbars are see-through on purpose (see uiHoles): the pen belongs there.
+      if (el?.closest(`${OVER_NOTE}, ${FLOATING}, .oni-toolbar`)) return;
       const what = el ? `${el.tagName.toLowerCase()}.${Array.from(el.classList).join(".")}` : "?";
       this.send({ type: "debug", message: `pen down reached Obsidian, not the ink layer: (${Math.round(e.clientX)},${Math.round(e.clientY)}) on ${what} in a ${this.inkKind()} view` });
     }, { capture: true });
@@ -281,10 +289,14 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
   private sendTool() {
     const s = this.settings;
     const slot = s.slots[s.active] ?? s.slots[0];
+    // The Ink to Text and Ink Editor pens and Insert space are for notes (their buttons only show there): on
+    // a PDF or picture the current pen writes instead, or the pen did nothing there. The choice is kept for notes.
+    const notesOnly = s.tool === "text-pen" || s.tool === "editor-pen" || s.tool === "space";
+    const tool = s.tool === "slot" || (notesOnly && this.inkKind() !== null && this.inkKind() !== "markdown") ? "slot" : s.tool;
     this.send({
       type: "tool",
-      tool: s.tool === "slot" ? slot.kind : s.tool,
-      effect: s.tool === "slot" && slot.kind === "pen" ? slot.effect ?? null : null,
+      tool: tool === "slot" ? slot.kind : tool,
+      effect: tool === "slot" && slot.kind === "pen" ? slot.effect ?? null : null,
       color: slot.color,
       size: mmToPx(slot.size),
       eraserSize: mmToPx(s.eraserSize),
@@ -420,7 +432,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       changes?: TextChange[]; strokes?: number; inkWords?: number; changed?: string[];
       count?: number; id?: number; inkPath?: string; purpose?: string; lines?: RecognizedLine[];
       line?: number; lineEnd?: number; latex?: string; linear?: string;
-      edited?: boolean; visible?: boolean; kind?: string; x?: number; y?: number; w?: number; h?: number; tipX?: number; tipY?: number; playing?: boolean;
+      edited?: boolean; retry?: boolean; quiet?: boolean; visible?: boolean; kind?: string; x?: number; y?: number; w?: number; h?: number; tipX?: number; tipY?: number; playing?: boolean;
     };
     try {
       msg = JSON.parse(line);
@@ -585,6 +597,47 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     this.openInOneNote({ navigate: false });
   }
 
+  // ---------- ink files follow their notes ----------
+
+  /** A note (PDF, picture) renamed or moved: its ink goes along, and so does its OneNote page. */
+  private inkFileMoved(file: TFile, oldPath: string) {
+    const base = this.vaultPath();
+    if (!base) return;
+    const kind = file.extension === "md" ? "markdown" : "pdf";
+    const from = inkFileFor(oldPath, kind), to = inkFileFor(file.path, kind);
+    if (this.helper) {
+      // The helper moves it (it may have that ink open, unsaved): sent now, before the next layout names
+      // the new path. A folder renamed moves the ink with it; the helper then just follows.
+      this.send({ type: "rename-ink", from: path.join(base, from), to: path.join(base, to) });
+    } else {
+      void (async () => {
+        const adapter = this.app.vault.adapter;
+        if (await adapter.exists(from) && !(await adapter.exists(to))) await adapter.rename(from, to);
+      })();
+    }
+    const page = this.settings.oneNotePages[oldPath];
+    if (page && !this.settings.oneNotePages[file.path]) {
+      this.settings.oneNotePages[file.path] = page;
+      delete this.settings.oneNotePages[oldPath];
+      this.persist();
+    }
+  }
+
+  /** A note (PDF, picture) deleted: its ink goes to the trash with it (not left behind for search to find). */
+  private inkFileGone(file: TFile) {
+    const base = this.vaultPath();
+    if (!base) return;
+    const ink = inkFileFor(file.path, file.extension === "md" ? "markdown" : "pdf");
+    const inkFile = this.app.vault.getFileByPath(ink);
+    if (!inkFile) return;
+    // The helper lets go of it first, so nothing is saved there again.
+    this.send({ type: "rename-ink", from: path.join(base, ink), to: null });
+    window.setTimeout(() => {
+      const still = this.app.vault.getFileByPath(ink);
+      if (still) void this.app.fileManager.trashFile(still);
+    }, 500);
+  }
+
   // ---------- Insert space, Ink Editor pen ----------
 
   /** The note the helper means (by its ink file), if it's the open one. */
@@ -683,11 +736,12 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       }
     } else {
       await this.app.vault.process(file, (data) => {
-        const lines = data.split("\n");
+        const eol = data.includes("\r\n") ? "\r\n" : "\n";
+        const lines = data.split(eol);
         while (lines.length < at) lines.push("");
         remove = Math.min(remove, lines.length - at);
         lines.splice(at, remove, ...insert);
-        const text = lines.join("\n");
+        const text = lines.join(eol);
         this.reported.set(notePath, text);
         return text;
       });
@@ -782,7 +836,10 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       const before = view.editor.getValue().split("\n");
       replaceLines(view.editor, before, change(before.slice()));
     } else {
-      await this.app.vault.process(file, (data) => change(data.split("\n")).join("\n"));
+      await this.app.vault.process(file, (data) => {
+        const eol = data.includes("\r\n") ? "\r\n" : "\n";
+        return change(data.split(eol)).join(eol);
+      });
     }
     return true;
   }
@@ -806,7 +863,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     const file = this.app.vault.getFileByPath(source.notePath);
     if (!file) return false;
     const open = this.app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v): v is MarkdownView => v instanceof MarkdownView && v.file?.path === source.notePath);
-    const lines = (open ? open.getViewData() : await this.app.vault.cachedRead(file)).split("\n");
+    const lines = (open ? open.getViewData() : await this.app.vault.cachedRead(file)).split(/\r?\n/);
     const after = Math.max(source.line, source.lineEnd);
     const at = after < 0 ? lines.length : after + 1;
     // Blocks (lists, callouts, code) need a blank line before them.
@@ -970,9 +1027,18 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
   }
 
   private onSent(msg: { ok?: boolean; noteKey?: string; state?: SyncState; navigated?: boolean; navigate?: boolean;
-    pageChanged?: boolean; textChanges?: number; inkChanged?: boolean; error?: string }) {
+    pageChanged?: boolean; textChanges?: number; inkChanged?: boolean; error?: string; retry?: boolean; quiet?: boolean }) {
     const noteKey = msg.noteKey;
     if (noteKey) this.busy.delete(noteKey);
+    if (msg.retry && noteKey) {
+      // OneNote wasn't reachable (starting, closed, updating): the change is still owed. Try again in a
+      // minute; a background send says nothing, it just gets there later.
+      if (this.syncsNote(noteKey)) {
+        this.pendingPush.add(noteKey);
+        window.setTimeout(() => this.flushPush(noteKey), 60_000);
+      }
+      if (msg.quiet) return;
+    }
     if (msg.ok && noteKey && msg.state) {
       this.settings.oneNotePages[noteKey] = msg.state;
       this.dismissed.delete(noteKey);
@@ -1120,6 +1186,8 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     if (kind !== this.toolbarKind) {
       this.toolbarKind = kind;
       this.toolbar.render();
+      // Some tools are for notes only (see sendTool).
+      this.sendTool();
     }
     if (view && this.settings.showToolbar) {
       if (el.parentElement !== view.containerEl || el.nextElementSibling !== view.contentEl) {
@@ -1173,7 +1241,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
         dpr: window.devicePixelRatio,
         dark: isDarkTheme(),
         inkPath,
-        holes: this.holes(area, view),
+        holes: uiHoles(area, view),
         domInk: true,
       };
     }
@@ -1194,19 +1262,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     return path.join(base, notePath).replace(/\.md$/i, ".ink");
   }
 
-  private lastHoles = "";
   private lastMissLog = -Infinity;
-
-  /** The see-through holes (see uiHoles), written to the helper's log when they change. */
-  private holes(area: DOMRect, view: FileView) {
-    const holes = uiHoles(area, view);
-    const described = holes.map((h) => `${h.what} ${h.w}x${h.h}`).join(", ");
-    if (described !== this.lastHoles) {
-      this.lastHoles = described;
-      this.send({ type: "debug", message: `see-through: ${described || "none"} (ink area ${Math.round(area.width)}x${Math.round(area.height)})` });
-    }
-    return holes;
-  }
 
   /** Screen area the ink layer covers right now (for arming the pen); null when it's hidden. */
   private inkArea: DOMRect | null = null;
@@ -1239,18 +1295,13 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
         dpr: window.devicePixelRatio,
         dark: layout.dark,
         inkPath,
-        holes: this.holes(layout.area, view),
-        // PDFs: the ink is drawn in the viewer while the pen is away, so it scrolls with the pages.
-        domInk: !!layout.scroller,
+        holes: uiHoles(layout.area, view),
+        // The ink is drawn in the page while the pen is away, so it scrolls with the PDF's pages or the picture.
+        domInk: !!layout.inkHost,
       };
     }
-    // (Images keep the ink window: their view doesn't scroll the way a PDF does.)
-    const scroller = this.enabled && layout?.scroller && inkPath && !covered ? layout.scroller : null;
-    this.domInk.mount(scroller, inkPath, scroller && layout ? {
-      left: layout.ox - scroller.clientLeft + scroller.scrollLeft,
-      top: layout.oy - scroller.clientTop + scroller.scrollTop,
-      scale: layout.zoom,
-    } : undefined);
+    const host = this.enabled && layout?.inkHost && inkPath && !covered ? layout.inkHost : null;
+    this.domInk.mount(host?.el ?? null, inkPath, host && layout ? { left: host.left, top: host.top, scale: layout.zoom, positioned: host.positioned } : undefined);
     const key = JSON.stringify({ ...msg, title: undefined });
     if (key !== this.lastSent) {
       this.lastSent = key;

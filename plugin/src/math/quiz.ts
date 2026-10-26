@@ -50,8 +50,7 @@ export function makeQuiz(p: Problem, action: Action, count: number, settings: Ma
     try { variant = parseProblem(linear); } catch { continue; }
     if (variant.kind !== p.kind) continue;
     const result = run(variant, action, settings);
-    if (result.error || !result.latex || result.unchanged || /No (real )?solution|Infinitely/.test(result.latex)) continue;
-    // Keep worksheet-friendly answers only.
+    if (result.error || !result.latex || result.unchanged || /No (real )?solution|Infinitely/.test(result.latex)) continue;    // Keep worksheet-friendly answers only.
     if ((action.id === "solve" || action.id === "solve-system") && !(result.values?.length && result.values.every(tidy))) continue;
     if (action.id === "solve-inequality" && /approx|sqrt/.test(result.latex)) continue;
     seen.add(key);

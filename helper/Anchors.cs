@@ -274,17 +274,9 @@ public sealed partial class OverlayWindow
         saveDebounce.Start();
     }
 
-    string? firstStrokeLogged;
-
     /// <summary>A stroke just added (drawn, shape-converted, split by the point eraser).</summary>
     void OnStrokeAdded(Stroke s)
     {
-        if (inkPath != firstStrokeLogged)
-        {
-            // Once per file: tells "the pen never reached the ink" apart from "it drew but couldn't be seen".
-            firstStrokeLogged = inkPath;
-            Protocol.Log($"drawing on {System.IO.Path.GetFileName(inkPath)} ({topsMode ?? "no lines yet"}), colour {s.DrawingAttributes.Color}");
-        }
         if (!s.ContainsPropertyData(StrokeTimeId)) s.AddPropertyData(StrokeTimeId, DateTime.UtcNow.Ticks);
         if (TryGetAnchor(s, out _, out _)) { lastStroke = s; lastStrokeAt = DateTime.Now; return; }
         if (tops == null) unanchoredNew.Add(s);

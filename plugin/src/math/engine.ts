@@ -208,7 +208,11 @@ export function run(p: Problem, action: Action, settings: MathSettings = DEFAULT
       case "graph": return graph(p, false, settings);
       case "graph-both": return graph(p, true, settings);
       case "evaluate": return evaluate(p, settings);
-      case "simplify": return transform(p, "simplify", nerdamer.simplify(withAngles(p.linear, settings)).toString());
+      case "simplify": {
+        // nerdamer's simplify likes to factor (4x+2 → 2(2x+1)); for a plain sum, simplifying means collecting terms.
+        const simple = nerdamer.simplify(withAngles(p.linear, settings)).toString();
+        return transform(p, "simplify", !/\(/.test(p.linear) && /\(/.test(simple) ? nerdamer.expand(p.linear).toString() : simple);
+      }
       case "expand": return transform(p, "expand", nerdamer.expand(p.linear).toString());
       case "factor": return transform(p, "factor", nerdamer.factor(p.linear).toString());
       case "derivative": return derivative(p, action.variable ?? p.vars[0]);
@@ -537,10 +541,32 @@ function solveSystem(p: Problem, settings: MathSettings): Result {
 
 // ---------- expressions ----------
 
+/** An expression's terms and their factors, each sorted: the same however they're ordered (2+4*x = 4*x+2). */
+function writtenForm(expr: string): string {
+  const s = expr.replace(/\s/g, "");
+  const terms: string[] = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i <= s.length; i++) {
+    const c = s[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    // A sign at the top level starts a term (not one right after ^, * or / : x^-1, 2*-x).
+    if (i === s.length || (depth === 0 && i > start && (c === "+" || c === "-") && !/[\^*/]/.test(s[i - 1]))) {
+      const term = s.slice(start, i);
+      const sign = term.startsWith("-") ? "-" : "";
+      terms.push(sign + term.replace(/^[+-]/, "").split("*").sort().join("*"));
+      start = i;
+    }
+  }
+  return terms.sort().join("+");
+}
+
 function transform(p: Problem, what: string, result: string): Result {
   const tex = toTeX(result);
   // Written the same way as the problem (2x+3 simplified is 2x+3): say so instead of repeating it.
-  const same = result.replace(/\s/g, "") === nerdamer(p.linear).toString().replace(/\s/g, "");
+  // Compared with the problem as written (nerdamer simplifies whatever it parses: 2x+3x reads back as 5x),
+  // in any order (it writes 4x+2 as 2+4x).
+  const same = writtenForm(result) === writtenForm(p.linear);
   const note = !same ? undefined
     : what === "factor" ? "This doesn't factor over the rational numbers."
     : what === "expand" ? "There's nothing to multiply out."

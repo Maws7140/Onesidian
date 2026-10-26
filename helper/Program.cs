@@ -76,6 +76,8 @@ public sealed class Command
     public string? Effect { get; set; }          // "tool": effect pen (rainbow, galaxy...), with Tool "pen"
     public int Line { get; set; }                // "space-applied": where lines went in (or came out)...
     public int Count { get; set; }               // ...and how many (negative: removed)
+    public string? From { get; set; }            // "rename-ink": the ink file's old path...
+    public string? To { get; set; }              // ...and new one (null: its file was deleted)
 }
 
 public sealed class Hole

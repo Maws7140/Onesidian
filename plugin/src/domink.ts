@@ -76,17 +76,18 @@ export class DomInk {
    * Keep the copy in the note being shown (its text column, where ink coordinates start), or take it out
    * when there's no note, the ink is for another note, or the ink layer is off.
    *
-   * `at`: a PDF instead. The copy goes in the viewer's scrolling container (positioned already, so it's
-   * left alone), at the first page's top-left in the container's scrolled content, scaled from PDF points
-   * to CSS px: it then scrolls with the pages, where the ink window chasing them lagged and bounced.
+   * `at`: a PDF or a picture instead. The copy goes in an element that scrolls with it (the PDF viewer's
+   * scrolling container, the picture's box), at the content's top-left, scaled from ink units (PDF points,
+   * image pixels) to CSS px: it then scrolls with the pages, where the ink window chasing them lagged and
+   * bounced. `positioned`: the element is a containing block already, so its CSS is left alone.
    */
-  mount(host: HTMLElement | null, inkPath: string | null, at?: { left: number; top: number; scale: number }) {
+  mount(host: HTMLElement | null, inkPath: string | null, at?: { left: number; top: number; scale: number; positioned?: boolean }) {
     if (!host || !inkPath || inkPath !== this.path) {
       this.svg.remove();
       return;
     }
     if (this.svg.parentElement !== host) {
-      if (!at) host.addClass("oni-ink-host");
+      if (!at?.positioned) host.addClass("oni-ink-host");
       host.appendChild(this.svg);
       this.svg.style.visibility = this.nativeShown ? "hidden" : "";
     }

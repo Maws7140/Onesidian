@@ -19,8 +19,12 @@ export function inkKindOf(view: View | null | undefined): InkKind | null {
  */
 export interface ContentLayout {
   area: DOMRect;
-  /** A PDF's scrolling container, which the note-style copy of the ink goes in (see DomInk.mount). */
-  scroller?: HTMLElement;
+  /**
+   * Where the in-page copy of the ink goes (see DomInk.mount): an element that scrolls with the content,
+   * and the content's top-left inside it (CSS px). `positioned`: the element is already a containing block
+   * (leave its CSS alone).
+   */
+  inkHost?: { el: HTMLElement; left: number; top: number; positioned: boolean };
   ox: number;
   oy: number;
   zoom: number;
@@ -65,7 +69,9 @@ export function pdfLayout(view: FileView): ContentLayout | null {
 
   // Ink colours follow the page, not the app theme: Obsidian can draw PDF pages dark in dark mode.
   const bg = getComputedStyle(pages[0]).backgroundColor;
-  return { area, scroller: container, ox: left0 - area.left, oy: top0 - area.top, zoom, tops, hashes, source, dark: isDarkColor(bg) };
+  // The scrolling container itself: its content (the pages) scrolls under it.
+  const inkHost = { el: container, left: left0 - area.left - container.clientLeft + container.scrollLeft, top: top0 - area.top - container.clientTop + container.scrollTop, positioned: true };
+  return { area, inkHost, ox: left0 - area.left, oy: top0 - area.top, zoom, tops, hashes, source, dark: isDarkColor(bg) };
 }
 
 export function imageLayout(view: FileView): ContentLayout | null {
@@ -75,7 +81,10 @@ export function imageLayout(view: FileView): ContentLayout | null {
   const r = img.getBoundingClientRect();
   if (r.width === 0) return null;
   // Ink in image pixels: it stays on the same spot of the picture at any size. Pictures aren't recoloured.
-  return { area, ox: r.left - area.left, oy: r.top - area.top, zoom: r.width / img.naturalWidth, tops: [0], hashes: [1], source: "image", dark: false };
+  // The in-page copy goes beside the picture, in its container (which scrolls with it).
+  const box = img.parentElement;
+  const inkHost = box ? (() => { const b = box.getBoundingClientRect(); return { el: box, left: r.left - b.left - box.clientLeft, top: r.top - b.top - box.clientTop, positioned: false }; })() : undefined;
+  return { area, inkHost, ox: r.left - area.left, oy: r.top - area.top, zoom: r.width / img.naturalWidth, tops: [0], hashes: [1], source: "image", dark: false };
 }
 
 function isDarkColor(css: string): boolean {

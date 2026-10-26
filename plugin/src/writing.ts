@@ -33,7 +33,7 @@ export function placeRecognized(doc: string[], recognized: RecognizedLine[]): st
     byLine.set(line, group);
   }
 
-  // Bottom up, so inserting under the frontmatter doesn't shift lines still to place.
+  // Bottom up, so inserting under the frontmatter (or under a fence) doesn't shift lines still to place.
   const lines = [...byLine.keys()].sort((a, b) => b - a);
   const intoFrontmatter: string[] = [];
   for (const line of lines) {
@@ -45,7 +45,10 @@ export function placeRecognized(doc: string[], recognized: RecognizedLine[]): st
     }
     while (out.length <= line) out.push("");
     const current = out[line];
-    out[line] = current.trim() === "" ? (list ? "- " : "") + text : current.replace(/\s+$/, "") + " " + text;
+    if (current.trim() === "") out[line] = (list ? "- " : "") + text;
+    // Words added to a code fence, a $$ line, a rule or a table row would break that block: own line, below.
+    else if (/^\s*(```|~~~|\$\$|(-{3,}|\*{3,}|_{3,})\s*$|\|.*\|\s*$)/.test(current)) out.splice(line + 1, 0, (list ? "- " : "") + text);
+    else out[line] = current.replace(/\s+$/, "") + " " + text;
   }
   if (intoFrontmatter.length) out.splice(fmEnd + 1, 0, ...intoFrontmatter);
   return out;
@@ -88,7 +91,11 @@ export async function insertRecognized(app: App, view: MarkdownView, recognized:
     const before = view.editor.getValue().split("\n");
     replaceLines(view.editor, before, placeRecognized(before, recognized));
   } else {
-    await app.vault.process(file, (data) => placeRecognized(data.split("\n"), recognized).join("\n"));
+    await app.vault.process(file, (data) => {
+      // The file's own line endings, kept (splitting on \n alone left \r on some lines and not others).
+      const eol = data.includes("\r\n") ? "\r\n" : "\n";
+      return placeRecognized(data.split(eol), recognized).join(eol);
+    });
   }
   return true;
 }
