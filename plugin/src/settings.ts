@@ -86,9 +86,14 @@ export interface InkSettings {
   /** Draw ink with the GPU (smoother on some machines, ~100 MB more memory); off: software rendering. */
   gpuRendering: boolean;
   mathNumbers: "real" | "complex";
-  /** Notes (and PDFs, pictures) in these folders, and their subfolders, are ignored (see Ignored). */
+  /**
+   * "except": ink tools everywhere except the listed folders and tags. "only": only in them (every other
+   * note goes without), for a vault where ink is for a few folders.
+   */
+  ignoreMode: "except" | "only";
+  /** Folders (with their subfolders; PDFs and pictures too) left out, or the only ones in, by `ignoreMode`. */
   ignoreFolders: string[];
-  /** Notes with any of these tags (or a nested tag under one) are ignored. Without the #. */
+  /** Tags (or tags nested under them), without the #: left out, or the only ones in, by `ignoreMode`. */
   ignoreTags: string[];
   /**
    * Frontmatter property that ignores a note: true (what's hidden is `ignoreHides`), a list of what to
@@ -142,6 +147,7 @@ export const DEFAULT_SETTINGS: InkSettings = {
   mathAngle: "rad",
   gpuRendering: false,
   mathNumbers: "real",
+  ignoreMode: "except",
   ignoreFolders: [],
   ignoreTags: [],
   ignoreProperty: "ink-ignore",
@@ -151,9 +157,11 @@ export const DEFAULT_SETTINGS: InkSettings = {
 /**
  * What a file goes without, from the ignore rules: its folder, its tags (with `#`, frontmatter ones
  * included) and its ignore property (`undefined` when it has none). The property wins: a list names
- * exactly what to hide, true hides the usual, false keeps everything on.
+ * exactly what to hide, true hides the usual, false keeps everything on. Otherwise the folders and tags
+ * decide: in "except" mode a listed note goes without, in "only" mode an unlisted one does.
  */
-export function ignoredFor(path: string, tags: string[], property: unknown, s: Pick<InkSettings, "ignoreFolders" | "ignoreTags" | "ignoreHides">): Ignored {
+export function ignoredFor(path: string, tags: string[], property: unknown,
+  s: Pick<InkSettings, "ignoreFolders" | "ignoreTags" | "ignoreHides"> & { ignoreMode?: InkSettings["ignoreMode"] }): Ignored {
   if (property === false || property === "false" || property === "no" || property === "off") return NOT_IGNORED;
   const words = Array.isArray(property) ? property.map(String)
     : typeof property === "string" && !["true", "yes", "on", ""].includes(property.trim().toLowerCase()) ? property.split(/[,\s]+/)
@@ -171,7 +179,10 @@ export function ignoredFor(path: string, tags: string[], property: unknown, s: P
     const tag = t.replace(/^#/, "").toLowerCase();
     return wanted.some((w) => tag === w || tag.startsWith(w + "/"));
   });
-  return folder || tagged ? { ...s.ignoreHides } : NOT_IGNORED;
+  const listed = folder || tagged;
+  // "Only" with nothing listed yet means nothing chosen yet, not "no note at all".
+  if (s.ignoreMode === "only") return listed || (!s.ignoreFolders.some((f) => f.trim()) && !wanted.length) ? NOT_IGNORED : { ...s.ignoreHides };
+  return listed ? { ...s.ignoreHides } : NOT_IGNORED;
 }
 
 export const MAX_SLOTS = 8;

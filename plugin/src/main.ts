@@ -1578,24 +1578,35 @@ class InkSettingTab extends PluginSettingTab {
         d.setValue(s.pageLines).onChange((v) => { s.pageLines = v; this.plugin.save(); });
       });
 
-    new Setting(containerEl).setName("Notes without ink tools").setHeading()
-      .setDesc("Dashboards, templates, reading notes... go without the lines, the toolbar or the ink layer.");
+    new Setting(containerEl).setName("Where ink tools appear").setHeading();
+
+    const only = s.ignoreMode === "only";
+    new Setting(containerEl)
+      .setName("Ink tools are on")
+      .setDesc(only
+        ? "Only in the folders and tags below: every other note goes without (chosen underneath). With nothing listed yet, they're on everywhere."
+        : "Everywhere except the folders and tags below (dashboards, templates, reading notes...).")
+      .addDropdown((d) => d
+        .addOption("except", "Everywhere, except…")
+        .addOption("only", "Only in…")
+        .setValue(s.ignoreMode)
+        .onChange((v) => { s.ignoreMode = v as "except" | "only"; this.plugin.save(false); this.display(); }));
 
     const lines = (v: string) => v.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
     new Setting(containerEl)
-      .setName("Folders")
+      .setName(only ? "Folders with ink tools" : "Folders without ink tools")
       .setDesc("One per line; subfolders too. Also applies to PDFs and pictures.")
       .addTextArea((t) => {
-        t.setPlaceholder("Templates\nDaily notes/Dashboards").setValue(s.ignoreFolders.join("\n"))
+        t.setPlaceholder(only ? "School\nJournal" : "Templates\nDaily notes/Dashboards").setValue(s.ignoreFolders.join("\n"))
           .onChange((v) => { s.ignoreFolders = lines(v); this.plugin.save(false); });
         t.inputEl.rows = 3;
       });
 
     new Setting(containerEl)
-      .setName("Tags")
+      .setName(only ? "Tags with ink tools" : "Tags without ink tools")
       .setDesc("Notes with any of these tags (or tags nested under them), with or without the #.")
       .addTextArea((t) => {
-        t.setPlaceholder("dashboard\nno-ink").setValue(s.ignoreTags.join("\n"))
+        t.setPlaceholder(only ? "class\nhandwritten" : "dashboard\nno-ink").setValue(s.ignoreTags.join("\n"))
           .onChange((v) => { s.ignoreTags = lines(v); this.plugin.save(false); });
         t.inputEl.rows = 3;
       });
@@ -1609,19 +1620,21 @@ class InkSettingTab extends PluginSettingTab {
         f.createEl("code", { text: "[lines, toolbar, ink]" });
         f.appendText("); ");
         f.createEl("code", { text: "false" });
-        f.appendText(" keeps everything on, even in an ignored folder or tag. The command \"Turn ink tools off/on for this note\" sets it.");
+        f.appendText(only
+          ? " turns them on for a note outside those folders and tags. The command \"Turn ink tools off/on for this note\" sets it."
+          : " keeps everything on, even in a folder or tag above. The command \"Turn ink tools off/on for this note\" sets it.");
       }))
       .addText((t) => t.setPlaceholder("ink-ignore").setValue(s.ignoreProperty)
         .onChange((v) => { s.ignoreProperty = v.trim(); this.plugin.save(false); }));
 
     new Setting(containerEl)
-      .setName("Ignored notes go without rule lines")
+      .setName("Notes without ink tools have no rule lines")
       .addToggle((t) => t.setValue(s.ignoreHides.lines).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, lines: v }; this.plugin.save(false); }));
     new Setting(containerEl)
-      .setName("Ignored notes go without the toolbar")
+      .setName("Notes without ink tools have no toolbar")
       .addToggle((t) => t.setValue(s.ignoreHides.toolbar).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, toolbar: v }; this.plugin.save(false); }));
     new Setting(containerEl)
-      .setName("Ignored notes go without ink")
+      .setName("Notes without ink tools have no ink")
       .setDesc("No writing on them, and ink already there isn't shown (it stays in its file).")
       .addToggle((t) => t.setValue(s.ignoreHides.ink).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, ink: v }; this.plugin.save(false); }));
 
