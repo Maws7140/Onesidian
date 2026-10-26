@@ -39,8 +39,10 @@ public sealed partial class OverlayWindow
 
         ink.PreviewStylusDown += (_, e) =>
         {
-            if (e.Handled || !ShapesActive()) return;
             ClearHold();
+            // Not the eraser end: the canvas stays in ink mode while the pen is flipped, and an erasing
+            // back-and-forth held still was read as a shape (a triangle preview was left on the page).
+            if (e.Handled || e.StylusDevice.Inverted || !ShapesActive()) return;
             tracking = true;
             AddPoints(e.GetStylusPoints(ink));
         };
@@ -49,6 +51,14 @@ public sealed partial class OverlayWindow
             if (tracking && !e.InAir) AddPoints(e.GetStylusPoints(ink));
         };
         ink.StrokeCollected += OnStrokeCollected;
+        // A pen-down that didn't end in a stroke (erasing, a scratch-out, a dot too small to keep) leaves no
+        // shape preview behind: once the lift is handled, anything still tracked is dropped.
+        ink.PreviewStylusUp += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (!tracking) return;
+            tracking = false;
+            ClearHold();
+        });
     }
 
     bool ShapesActive() =>

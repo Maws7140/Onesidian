@@ -62,7 +62,8 @@ public sealed partial class OverlayWindow
             e.Handled = true;
             return;
         }
-        if (!IsPageTool) return;
+        // The eraser end erases, whatever the tool (it drew shapes and laser lines).
+        if (!IsPageTool || e.StylusDevice.Inverted) return;
         // A shape just drawn stays selected so it can be resized or moved with its handles (like OneNote);
         // the pen on those handles or inside the shape adjusts it, anywhere else starts the next shape.
         if (IsShapeTool && ink.EditingMode == InkCanvasEditingMode.Select)
