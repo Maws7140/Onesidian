@@ -1,7 +1,7 @@
-import { App, FileSystemAdapter, FileView, MarkdownRenderChild, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, debounce, loadMathJax } from "obsidian";
+import { App, FileSystemAdapter, FileView, MarkdownRenderChild, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, debounce, getAllTags, loadMathJax } from "obsidian";
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import * as path from "path";
-import { DEFAULT_SETTINGS, DEFAULT_SLOTS, ERASER_SIZES, InkSettings, PAGE_LINES, isDarkTheme, mmToPx } from "./settings";
+import { DEFAULT_SETTINGS, DEFAULT_SLOTS, ERASER_SIZES, Ignored, InkSettings, NOT_IGNORED, PAGE_LINES, ignoredFor, isDarkTheme, mmToPx } from "./settings";
 import { Toolbar, ToolbarHost } from "./toolbar";
 import { clearBlankSpace, describeLayout, lineHashes, lineTops } from "./lines";
 import { OverwriteModal, PullModal, SyncState, TextChange, applyTextChanges, noteBlocks, textColumn, withoutEchoes } from "./onenote";
@@ -64,6 +64,15 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       this.save();
     } });
     this.addCommand({ id: "undo-ink", name: "Undo ink", callback: () => this.command("undo") });
+    this.addCommand({
+      id: "toggle-ink-tools-for-note",
+      name: "Turn ink tools off/on for this note",
+      checkCallback: (checking) => {
+        if (!this.activeNote() || !this.settings.ignoreProperty.trim()) return false;
+        if (!checking) void this.toggleIgnoreNote();
+        return true;
+      },
+    });
     this.addCommand({
       id: "restart-ink-helper",
       name: "Restart the ink helper (if the pen stops drawing)",
@@ -162,11 +171,14 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     // re-read by the helper after each save), and follow ink files that are renamed or deleted.
     await this.handwriting.load();
     this.app.workspace.onLayoutReady(() => window.setTimeout(() => this.indexStaleInk(), 5000));
+    this.registerEvent(this.app.metadataCache.on("changed", (f) => this.ignoreCache.delete(f.path)));
     this.registerEvent(this.app.vault.on("delete", (f) => {
+      this.ignoreCache.clear();
       this.handwriting.remove(f.path);
       if (f instanceof TFile && f.extension !== "ink") this.inkFileGone(f);
     }));
     this.registerEvent(this.app.vault.on("rename", (f, old) => {
+      this.ignoreCache.clear();
       this.handwriting.rename(old, f.path);
       if (f instanceof TFile && f.extension !== "ink") this.inkFileMoved(f, old);
     }));
@@ -241,6 +253,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
   // ---------- ToolbarHost ----------
 
   save(rerender = true) {
+    this.ignoreCache.clear();
     this.persist();
     this.sendTool();
     if (rerender) this.toolbar?.render();
@@ -1201,14 +1214,17 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
 
   private sync() {
     const target = this.activeInkView();
-    this.mountToolbar(target?.view ?? null);
+    // Notes (folders, tags, a property) set to go without some of this: see ignoreFor.
+    const ignored = this.ignoreFor(target?.view.file ?? null);
+    const inkOn = this.enabled && !ignored.ink;
+    this.mountToolbar(ignored.toolbar ? null : target?.view ?? null);
 
     // A dialog covers the whole note: the ink steps aside. Menus, popovers and floating toolbars only
     // cover part of it: those get a see-through hole in the ink layer instead (see uiHoles).
     const covered = document.body.querySelector(".modal-container") !== null;
     const base = this.vaultPath();
     if (target && target.kind !== "markdown") {
-      this.syncContent(target.view, target.kind, base, covered);
+      this.syncContent(target.view, target.kind, base, covered, inkOn);
       return;
     }
     const view = target?.view instanceof MarkdownView ? target.view : null;
@@ -1216,12 +1232,14 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
     const sizer = !view ? null : view.getMode() === "preview"
       ? view.contentEl.querySelector(".markdown-preview-sizer")
       : view.contentEl.querySelector(".cm-sizer");
-    if (view && sizer instanceof HTMLElement) this.rulePage(view, sizer);
+    if (view && sizer instanceof HTMLElement) this.rulePage(view, sizer, ignored.lines);
+    // No ink here: no room kept below the text for it either.
+    if (ignored.ink && sizer instanceof HTMLElement) sizer.removeClass("oni-grow");
 
     const inkPath = view && base ? this.inkPathFor(base, view.file!.path) : null;
     let msg: object = { type: "layout", visible: false };
     this.inkArea = null;
-    if (this.enabled && view && !covered && inkPath) {
+    if (inkOn && view && !covered && inkPath) {
       const area = view.contentEl.getBoundingClientRect();
       this.inkArea = area;
       const page = (sizer ?? view.contentEl).getBoundingClientRect();
@@ -1246,7 +1264,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       };
     }
     // The ink drawn in the note (when the pen's away) lives in the text column, so it scrolls with it.
-    this.domInk.mount(this.enabled && view && sizer instanceof HTMLElement ? sizer : null, inkPath);
+    this.domInk.mount(inkOn && view && sizer instanceof HTMLElement ? sizer : null, inkPath);
 
     // Title churns as notes change; leave it out of the change check.
     const key = JSON.stringify({ ...msg, title: undefined });
@@ -1255,7 +1273,34 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
       this.send(msg);
     }
 
-    if (view && inkPath && sizer instanceof HTMLElement) this.syncLines(view, sizer, inkPath);
+    if (inkOn && view && inkPath && sizer instanceof HTMLElement) this.syncLines(view, sizer, inkPath);
+  }
+
+  private ignoreCache = new Map<string, Ignored>();
+
+  /** What this file goes without (rule lines, toolbar, ink layer), from the ignore settings. Cached per file. */
+  ignoreFor(file: TFile | null): Ignored {
+    if (!file) return NOT_IGNORED;
+    let result = this.ignoreCache.get(file.path);
+    if (!result) {
+      const cache = file.extension === "md" ? this.app.metadataCache.getFileCache(file) : null;
+      const property = this.settings.ignoreProperty.trim();
+      result = ignoredFor(file.path, cache ? getAllTags(cache) ?? [] : [], property ? cache?.frontmatter?.[property] : undefined, this.settings);
+      this.ignoreCache.set(file.path, result);
+    }
+    return result;
+  }
+
+  /** "Turn ink tools off/on for this note": sets the note's ignore property (false re-enables a note a folder or tag ignores). */
+  private async toggleIgnoreNote() {
+    const file = this.activeNote()?.file;
+    const property = this.settings.ignoreProperty.trim();
+    if (!file || !property) return;
+    const ignored = this.ignoreFor(file);
+    const off = !(ignored.lines || ignored.toolbar || ignored.ink);
+    await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => { fm[property] = off; });
+    this.ignoreCache.delete(file.path);
+    new Notice(off ? `Ink tools off for this note (${property}: true)` : `Ink tools back on for this note (${property}: false)`);
   }
 
   private inkPathFor(base: string, notePath: string) {
@@ -1273,12 +1318,12 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
    * A PDF or image: ink in its own units (PDF points / image pixels) so it scales with zoom, a PDF's
    * pages acting as its "lines" (see targets.ts) so ink stays on its page however the pages move.
    */
-  private syncContent(view: FileView, kind: InkKind, base: string | null, covered: boolean) {
+  private syncContent(view: FileView, kind: InkKind, base: string | null, covered: boolean, inkOn: boolean) {
     const layout = kind === "pdf" ? pdfLayout(view) : imageLayout(view);
     const inkPath = base && view.file ? path.join(base, inkFileFor(view.file.path, kind)) : null;
     let msg: object = { type: "layout", visible: false };
     this.inkArea = null;
-    if (this.enabled && layout && inkPath && !covered) {
+    if (inkOn && layout && inkPath && !covered) {
       this.inkArea = layout.area;
       msg = {
         type: "layout",
@@ -1300,7 +1345,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
         domInk: !!layout.inkHost,
       };
     }
-    const host = this.enabled && layout?.inkHost && inkPath && !covered ? layout.inkHost : null;
+    const host = inkOn && layout?.inkHost && inkPath && !covered ? layout.inkHost : null;
     this.domInk.mount(host?.el ?? null, inkPath, host && layout ? { left: host.left, top: host.top, scale: layout.zoom, positioned: host.positioned } : undefined);
     const key = JSON.stringify({ ...msg, title: undefined });
     if (key !== this.lastSent) {
@@ -1398,8 +1443,8 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
    * Notebook rule lines behind the text column (and the grown ink space below it). Pitch and phase
    * come from the body text, so typed lines sit on the rules and handwriting lines up with them.
    */
-  private rulePage(view: MarkdownView, sizer: HTMLElement) {
-    const mode = PAGE_LINES.find((l) => l.id === this.settings.pageLines);
+  private rulePage(view: MarkdownView, sizer: HTMLElement, off = false) {
+    const mode = off ? undefined : PAGE_LINES.find((l) => l.id === this.settings.pageLines);
     sizer.toggleClass("oni-ruled", !!mode && !mode.grid);
     sizer.toggleClass("oni-grid", !!mode?.grid);
     if (!mode) return;
@@ -1532,6 +1577,53 @@ class InkSettingTab extends PluginSettingTab {
         for (const l of PAGE_LINES) d.addOption(l.id, l.label);
         d.setValue(s.pageLines).onChange((v) => { s.pageLines = v; this.plugin.save(); });
       });
+
+    new Setting(containerEl).setName("Notes without ink tools").setHeading()
+      .setDesc("Dashboards, templates, reading notes... go without the lines, the toolbar or the ink layer.");
+
+    const lines = (v: string) => v.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
+    new Setting(containerEl)
+      .setName("Folders")
+      .setDesc("One per line; subfolders too. Also applies to PDFs and pictures.")
+      .addTextArea((t) => {
+        t.setPlaceholder("Templates\nDaily notes/Dashboards").setValue(s.ignoreFolders.join("\n"))
+          .onChange((v) => { s.ignoreFolders = lines(v); this.plugin.save(false); });
+        t.inputEl.rows = 3;
+      });
+
+    new Setting(containerEl)
+      .setName("Tags")
+      .setDesc("Notes with any of these tags (or tags nested under them), with or without the #.")
+      .addTextArea((t) => {
+        t.setPlaceholder("dashboard\nno-ink").setValue(s.ignoreTags.join("\n"))
+          .onChange((v) => { s.ignoreTags = lines(v); this.plugin.save(false); });
+        t.inputEl.rows = 3;
+      });
+
+    new Setting(containerEl)
+      .setName("Property")
+      .setDesc(createFragment((f) => {
+        f.appendText("A note with this property set to ");
+        f.createEl("code", { text: "true" });
+        f.appendText(" is ignored; a list says exactly what it goes without (");
+        f.createEl("code", { text: "[lines, toolbar, ink]" });
+        f.appendText("); ");
+        f.createEl("code", { text: "false" });
+        f.appendText(" keeps everything on, even in an ignored folder or tag. The command \"Turn ink tools off/on for this note\" sets it.");
+      }))
+      .addText((t) => t.setPlaceholder("ink-ignore").setValue(s.ignoreProperty)
+        .onChange((v) => { s.ignoreProperty = v.trim(); this.plugin.save(false); }));
+
+    new Setting(containerEl)
+      .setName("Ignored notes go without rule lines")
+      .addToggle((t) => t.setValue(s.ignoreHides.lines).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, lines: v }; this.plugin.save(false); }));
+    new Setting(containerEl)
+      .setName("Ignored notes go without the toolbar")
+      .addToggle((t) => t.setValue(s.ignoreHides.toolbar).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, toolbar: v }; this.plugin.save(false); }));
+    new Setting(containerEl)
+      .setName("Ignored notes go without ink")
+      .setDesc("No writing on them, and ink already there isn't shown (it stays in its file).")
+      .addToggle((t) => t.setValue(s.ignoreHides.ink).onChange((v) => { s.ignoreHides = { ...s.ignoreHides, ink: v }; this.plugin.save(false); }));
 
     new Setting(containerEl).setName("OneNote").setHeading();
 

@@ -86,7 +86,27 @@ export interface InkSettings {
   /** Draw ink with the GPU (smoother on some machines, ~100 MB more memory); off: software rendering. */
   gpuRendering: boolean;
   mathNumbers: "real" | "complex";
+  /** Notes (and PDFs, pictures) in these folders, and their subfolders, are ignored (see Ignored). */
+  ignoreFolders: string[];
+  /** Notes with any of these tags (or a nested tag under one) are ignored. Without the #. */
+  ignoreTags: string[];
+  /**
+   * Frontmatter property that ignores a note: true (what's hidden is `ignoreHides`), a list of what to
+   * hide ([lines], [toolbar, ink]...), or false to keep everything on even in an ignored folder or tag.
+   */
+  ignoreProperty: string;
+  /** What ignored notes go without. */
+  ignoreHides: Ignored;
 }
+
+/** What a note goes without: rule lines, the toolbar, the ink layer itself. */
+export interface Ignored {
+  lines: boolean;
+  toolbar: boolean;
+  ink: boolean;
+}
+
+export const NOT_IGNORED: Ignored = { lines: false, toolbar: false, ink: false };
 
 export const DEFAULT_SLOTS: PenSlot[] = [
   { kind: "pen", color: "#000000", size: 0.5 },
@@ -122,7 +142,37 @@ export const DEFAULT_SETTINGS: InkSettings = {
   mathAngle: "rad",
   gpuRendering: false,
   mathNumbers: "real",
+  ignoreFolders: [],
+  ignoreTags: [],
+  ignoreProperty: "ink-ignore",
+  ignoreHides: { lines: true, toolbar: true, ink: false },
 };
+
+/**
+ * What a file goes without, from the ignore rules: its folder, its tags (with `#`, frontmatter ones
+ * included) and its ignore property (`undefined` when it has none). The property wins: a list names
+ * exactly what to hide, true hides the usual, false keeps everything on.
+ */
+export function ignoredFor(path: string, tags: string[], property: unknown, s: Pick<InkSettings, "ignoreFolders" | "ignoreTags" | "ignoreHides">): Ignored {
+  if (property === false || property === "false" || property === "no" || property === "off") return NOT_IGNORED;
+  const words = Array.isArray(property) ? property.map(String)
+    : typeof property === "string" && !["true", "yes", "on", ""].includes(property.trim().toLowerCase()) ? property.split(/[,\s]+/)
+    : null;
+  if (words) {
+    const w = new Set(words.map((x) => x.trim().toLowerCase().replace(/^no-/, "")));
+    if (w.has("all")) return { lines: true, toolbar: true, ink: true };
+    return { lines: w.has("lines"), toolbar: w.has("toolbar"), ink: w.has("ink") };
+  }
+  if (property === true || typeof property === "string") return { ...s.ignoreHides };
+  const folder = s.ignoreFolders.map((f) => f.trim().replace(/^\/+|\/+$/g, "")).filter(Boolean)
+    .some((f) => path === f || path.startsWith(f + "/"));
+  const wanted = s.ignoreTags.map((t) => t.trim().replace(/^#/, "").toLowerCase()).filter(Boolean);
+  const tagged = tags.some((t) => {
+    const tag = t.replace(/^#/, "").toLowerCase();
+    return wanted.some((w) => tag === w || tag.startsWith(w + "/"));
+  });
+  return folder || tagged ? { ...s.ignoreHides } : NOT_IGNORED;
+}
 
 export const MAX_SLOTS = 8;
 export const MAX_RECENT = 10;
