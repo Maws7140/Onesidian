@@ -17,4 +17,10 @@
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
+  <!-- Direct2D, for Windows' own ink renderer (the real pencil texture; see WindowsInk.cs). -->
+  <ItemGroup>
+    <PackageReference Include="Vortice.Direct2D1" Version="3.6.2" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
+  </ItemGroup>
+
 </Project>

@@ -137,6 +137,63 @@ public sealed class StyledStroke : Stroke
 {
     public StyledStroke(System.Windows.Input.StylusPointCollection points, DrawingAttributes da) : base(points, da) { }
 
+    /// <summary>Device pixels per ink unit the ink is shown at now (zoom and screen scale; set by the overlay).</summary>
+    public static double PixelsPerUnit = 2;
+
+    // The pencil as Windows drew it, and for which shape (relative to the first point), size, colour and scale:
+    // moving the stroke reuses it, anything else draws it again.
+    WindowsInk.Rendered? pencil;
+    int pencilKey;
+    Point pencilOrigin;
+    string? pencilPng;
+
+    /// <summary>Draw it again (the scale it's shown at changed).</summary>
+    public void Redraw() => OnInvalidated(EventArgs.Empty);
+
+    /// <summary>
+    /// This pencil stroke drawn by Windows (see WindowsInk), and how far the stroke has moved since: the
+    /// image goes at Bounds + offset. Null when Windows can't draw it.
+    /// </summary>
+    public WindowsInk.Rendered? PencilImage(DrawingAttributes da, out Vector offset)
+    {
+        offset = default;
+        var pts = StylusPoints;
+        if (pts.Count == 0) return null;
+        var origin = new Point(pts[0].X, pts[0].Y);
+        var hash = new HashCode();
+        foreach (var p in pts)
+        {
+            hash.Add(Math.Round(p.X - origin.X, 2));
+            hash.Add(Math.Round(p.Y - origin.Y, 2));
+            hash.Add(p.PressureFactor);
+        }
+        hash.Add(da.Width); hash.Add(da.Height); hash.Add(da.Color); hash.Add(da.IgnorePressure);
+        hash.Add(Math.Round(PixelsPerUnit, 2));
+        int key = hash.ToHashCode();
+        if (pencil == null || key != pencilKey)
+        {
+            pencil = WindowsInk.Pencil(pts, da.Width, da.Height, da.Color, da.IgnorePressure, PixelsPerUnit);
+            pencilKey = key;
+            pencilOrigin = origin;
+            pencilPng = null;
+        }
+        if (pencil == null) return null;
+        offset = origin - pencilOrigin;
+        return pencil;
+    }
+
+    /// <summary>The pencil image as PNG (base64), for the note's in-page copy; made once per drawing.</summary>
+    public string? PencilPng(DrawingAttributes da, out Rect bounds)
+    {
+        bounds = Rect.Empty;
+        var image = PencilImage(da, out var offset);
+        if (image == null) return null;
+        pencilPng ??= WindowsInk.Png(image.Image);
+        bounds = image.Bounds;
+        bounds.Offset(offset);
+        return pencilPng;
+    }
+
     public static StyledStroke From(Stroke s)
     {
         var styled = new StyledStroke(s.StylusPoints.Clone(), s.DrawingAttributes.Clone());
@@ -154,6 +211,15 @@ public sealed class StyledStroke : Stroke
     {
         var style = Pens.StyleOf(da);
         if (style == null) { base.DrawCore(dc, da); return; }
+        // OneNote's pencil is Windows' pencil: drawn by Windows itself (the paper-grain texture below is the
+        // fallback when Windows can't).
+        if (style == "pencil" && PencilImage(da, out var offset) is { } drawn)
+        {
+            var at = drawn.Bounds;
+            at.Offset(offset);
+            dc.DrawImage(drawn.Image, at);
+            return;
+        }
         var geometry = GetGeometry(da);
         var bounds = geometry.Bounds;
         dc.DrawGeometry(Pens.Fill(style, da.Color, bounds), null, geometry);

@@ -7,7 +7,13 @@
 export interface DomStroke {
   id: number;
   /** SVG path of the stroke's outline, in ink units (CSS px from the text column's top-left). */
-  d: string;
+  d?: string;
+  /** Or a picture of it (PNG, base64: a pencil stroke as Windows drew it) at x, y, w, h in ink units. */
+  img?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
   /** Colour #RRGGBB and opacity. */
   c: string;
   o: number;
@@ -27,11 +33,13 @@ export interface DomUpdate {
 
 const SVG = "http://www.w3.org/2000/svg";
 
+interface Entry { el: SVGPathElement | SVGImageElement; hl: boolean }
+
 export class DomInk {
   private svg: SVGSVGElement;
   private path = "";
   private nativeShown = true;
-  private strokes = new Map<number, { el: SVGPathElement; hl: boolean }>();
+  private strokes = new Map<number, Entry>();
 
   constructor() {
     this.svg = document.createElementNS(SVG, "svg");
@@ -46,21 +54,32 @@ export class DomInk {
       this.path = path;
     }
     for (const s of u.add ?? []) {
+      const kind = s.img ? "image" : "path";
       let entry = this.strokes.get(s.id);
-      if (!entry) {
-        entry = { el: document.createElementNS(SVG, "path"), hl: s.hl };
+      if (!entry || entry.el.tagName !== kind) {
+        entry = { el: document.createElementNS(SVG, kind) as SVGPathElement | SVGImageElement, hl: s.hl };
         this.strokes.set(s.id, entry);
       }
       entry.hl = s.hl;
-      entry.el.setAttribute("d", s.d);
-      entry.el.setAttribute("fill", s.c);
-      if (s.o < 1) entry.el.setAttribute("fill-opacity", String(s.o));
-      else entry.el.removeAttribute("fill-opacity");
+      const el = entry.el;
+      if (s.img) {
+        el.setAttribute("href", `data:image/png;base64,${s.img}`);
+        el.setAttribute("x", String(s.x ?? 0));
+        el.setAttribute("y", String(s.y ?? 0));
+        el.setAttribute("width", String(s.w ?? 0));
+        el.setAttribute("height", String(s.h ?? 0));
+        el.setAttribute("preserveAspectRatio", "none");
+      } else {
+        el.setAttribute("d", s.d ?? "");
+        el.setAttribute("fill", s.c);
+        if (s.o < 1) el.setAttribute("fill-opacity", String(s.o));
+        else el.removeAttribute("fill-opacity");
+      }
     }
     const order = u.order ?? [...this.strokes.keys()];
     const keep = new Set(order);
     for (const id of [...this.strokes.keys()]) if (!keep.has(id)) this.strokes.delete(id);
-    const listed = order.map((id) => this.strokes.get(id)).filter((e): e is { el: SVGPathElement; hl: boolean } => !!e);
+    const listed = order.map((id) => this.strokes.get(id)).filter((e): e is Entry => !!e);
     // Highlighters under the pen ink, each group in drawing order.
     this.svg.replaceChildren(...listed.filter((e) => e.hl).map((e) => e.el), ...listed.filter((e) => !e.hl).map((e) => e.el));
   }

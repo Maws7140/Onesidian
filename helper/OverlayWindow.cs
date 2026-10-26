@@ -543,6 +543,31 @@ public sealed partial class OverlayWindow : Window
         double dip = VisualTreeHelper.GetDpi(this).DpiScaleX;
         SizeInk();
         CutHoles(l, k, rect.w / dip, rect.h / dip);
+        PencilScale(scale.ScaleX * dip);
+    }
+
+    DispatcherTimer? pencilTimer;
+
+    /// <summary>
+    /// Pencil strokes are pictures drawn by Windows at a given scale (see StyledStroke.PencilImage): when the
+    /// scale changes (zooming a PDF, moving to another screen), they're drawn again once it settles.
+    /// </summary>
+    void PencilScale(double pixelsPerUnit)
+    {
+        if (!(pixelsPerUnit > 0) || Math.Abs(pixelsPerUnit - StyledStroke.PixelsPerUnit) < StyledStroke.PixelsPerUnit * 0.05) return;
+        StyledStroke.PixelsPerUnit = pixelsPerUnit;
+        if (pencilTimer == null)
+        {
+            pencilTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            pencilTimer.Tick += (_, _) =>
+            {
+                pencilTimer.Stop();
+                foreach (var s in ink.Strokes.OfType<StyledStroke>().Where(s => Pens.StyleOf(s.DrawingAttributes) == "pencil").ToList()) s.Redraw();
+                SchedulePublish();
+            };
+        }
+        pencilTimer.Stop();
+        pencilTimer.Start();
     }
 
     /// <summary>How tall the page of ink should be, in ink units (see ApplyLines).</summary>

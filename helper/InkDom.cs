@@ -151,6 +151,12 @@ public sealed partial class OverlayWindow
             if (id.Sent && !reset) continue;
             id.Sent = true;
             var da = s.DrawingAttributes;
+            // A pencil stroke goes as the picture Windows drew of it (an outline can't carry the grain).
+            if (s is StyledStroke styled && Pens.StyleOf(da) == "pencil" && styled.PencilPng(da, out var at) is { } png)
+            {
+                add.Add(new { id = id.Id, img = png, x = Math.Round(at.X, 2), y = Math.Round(at.Y, 2), w = Math.Round(at.Width, 2), h = Math.Round(at.Height, 2), c = "", o = 1.0, hl = false });
+                continue;
+            }
             string d;
             try { d = SvgPath(s.GetGeometry(da)); }
             catch { continue; }
