@@ -136,7 +136,7 @@ public static class OneNoteExport
     static StrokeCollection LoadInk(string? path)
     {
         if (path == null || !File.Exists(path)) return new StrokeCollection();
-        using var fs = File.OpenRead(path);
+        using var fs = OverlayWindow.OpenInk(path);
         return new StrokeCollection(fs); // the saved file has the true colours (no dark-mode flip)
     }
 

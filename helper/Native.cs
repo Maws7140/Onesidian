@@ -20,6 +20,45 @@ static class Native
 
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateFileW")]
+    static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, int infoClass, IntPtr info, uint size);
+
+    /// <summary>
+    /// Move `source` over `target`, even while someone has `target` open for reading (sharing delete, as our
+    /// own readers do): Windows' POSIX-style rename replaces it, where a plain move fails with "access denied"
+    /// (which lost saves while the handwriting reader had the file open). Falls back to File.Move where that
+    /// rename isn't supported (older Windows, FAT drives).
+    /// </summary>
+    public static void ReplaceFile(string source, string target)
+    {
+        const uint DELETE = 0x00010000, SYNCHRONIZE = 0x00100000, SHARE_ALL = 7, OPEN_EXISTING = 3;
+        const int FileRenameInfoEx = 22;
+        const uint REPLACE_IF_EXISTS = 0x1, POSIX_SEMANTICS = 0x2;
+        bool renamed = false;
+        using (var handle = CreateFile(source, DELETE | SYNCHRONIZE, SHARE_ALL, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero))
+        {
+            if (!handle.IsInvalid)
+            {
+                // FILE_RENAME_INFO: Flags (4) + padding (4), RootDirectory (8), FileNameLength (4), FileName.
+                var name = System.IO.Path.GetFullPath(target);
+                int size = 20 + (name.Length + 1) * 2;
+                var info = Marshal.AllocHGlobal(size);
+                try
+                {
+                    for (int i = 0; i < size; i++) Marshal.WriteByte(info, i, 0);
+                    Marshal.WriteInt32(info, 0, (int)(REPLACE_IF_EXISTS | POSIX_SEMANTICS));
+                    Marshal.WriteInt32(info, 16, name.Length * 2);
+                    Marshal.Copy(name.ToCharArray(), 0, info + 20, name.Length);
+                    renamed = SetFileInformationByHandle(handle, FileRenameInfoEx, info, (uint)size);
+                }
+                finally { Marshal.FreeHGlobal(info); }
+            }
+        }
+        if (!renamed) System.IO.File.Move(source, target, overwrite: true);
+    }
+
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);

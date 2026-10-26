@@ -211,7 +211,7 @@ public sealed partial class OverlayWindow
         try
         {
             if (!File.Exists(path)) return 0;
-            using var fs = File.OpenRead(path);
+            using var fs = OverlayWindow.OpenInk(path);
             return new StrokeCollection(fs).Count;
         }
         catch (Exception) { return 0; }

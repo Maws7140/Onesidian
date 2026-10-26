@@ -432,18 +432,60 @@ public sealed partial class OverlayWindow : Window
         }
         // Scratch-out anywhere in the answer counts (it was often second, "intermediate", behind "no gesture").
         bool scratch = e.GetGestureRecognitionResults().Any(r => r.ApplicationGesture == ApplicationGesture.ScratchOut && r.RecognitionConfidence != RecognitionConfidence.Poor);
-        var hits = scratch ? Covered(e.Strokes.GetBounds(), e.Strokes) : new StrokeCollection();
-        if (hits.Count == 0)
-        {
-            e.Cancel = true; // keep the stroke as ink
-            return;
-        }
-        ink.Strokes.Remove(hits);
+        // (The gesture's stroke isn't on the page: only what's under it goes.)
+        if (!scratch || !EraseUnder(e.Strokes)) e.Cancel = true; // keep the stroke as ink
     }
 
-    /// <summary>The ink a scribble over `bounds` covers (each stroke mostly inside), not counting the scribble.</summary>
-    StrokeCollection Covered(Rect bounds, StrokeCollection scribble) =>
-        new(ink.Strokes.HitTest(bounds, 60).Where(s => !scribble.Contains(s)));
+    /// <summary>
+    /// Scratch-out, as in OneNote: the ink under the scribble goes, not whole strokes that are mostly inside
+    /// its box (a scribble over part of a bracket, an integral or a cursive word erased nothing). The area is
+    /// the scribble's outline (its points' convex hull, widened by the pen), and covered strokes are erased
+    /// there only: a long stroke keeps the parts outside. False when it covers no ink (the scribble stays).
+    /// </summary>
+    bool EraseUnder(StrokeCollection scribble)
+    {
+        var hull = ScribbleArea(scribble);
+        if (hull.Count < 3) return false;
+        var area = new Rect(hull[0], hull[0]);
+        foreach (var p in hull) area.Union(p);
+        bool covers = ink.Strokes.Any(s => !scribble.Contains(s) && s.GetBounds().IntersectsWith(area) && s.HitTest(hull, 1));
+        if (!covers) return false;
+        var mine = new StrokeCollection(scribble.Where(ink.Strokes.Contains));
+        if (mine.Count > 0) ink.Strokes.Remove(mine);
+        ink.Strokes.Erase(hull);
+        return true;
+    }
+
+    /// <summary>The scribble's outline: the convex hull of its points, each widened by half the pen and a unit.</summary>
+    static List<Point> ScribbleArea(StrokeCollection scribble)
+    {
+        var points = new List<Point>();
+        foreach (var s in scribble)
+        {
+            double r = Math.Max(s.DrawingAttributes.Width, s.DrawingAttributes.Height) / 2 + 1;
+            foreach (var p in s.StylusPoints)
+            {
+                points.Add(new Point(p.X - r, p.Y - r)); points.Add(new Point(p.X + r, p.Y - r));
+                points.Add(new Point(p.X - r, p.Y + r)); points.Add(new Point(p.X + r, p.Y + r));
+            }
+        }
+        // Monotone chain.
+        points.Sort((a, b) => a.X != b.X ? a.X.CompareTo(b.X) : a.Y.CompareTo(b.Y));
+        if (points.Count < 3) return points;
+        double Cross(Point o, Point a, Point b) => (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
+        var hull = new List<Point>();
+        foreach (var pass in new[] { points, Enumerable.Reverse(points).ToList() })
+        {
+            int start = hull.Count;
+            foreach (var p in pass)
+            {
+                while (hull.Count >= start + 2 && Cross(hull[^2], hull[^1], p) <= 0) hull.RemoveAt(hull.Count - 1);
+                hull.Add(p);
+            }
+            hull.RemoveAt(hull.Count - 1);
+        }
+        return hull;
+    }
 
     /// <summary>
     /// Scratch-out the recognizer missed. Windows' recognizer wants five or more even passes; real scribbles
@@ -451,15 +493,7 @@ public sealed partial class OverlayWindow : Window
     /// at least four times along its long side, each pass across most of it, over existing ink. Letters with
     /// loops (their passes are short), a Z (three passes) or a zigzag over empty page don't count.
     /// </summary>
-    internal bool ScratchOutBy(Stroke stroke)
-    {
-        if (!IsScribble(stroke, Zoom)) return false;
-        var hits = Covered(stroke.GetBounds(), new StrokeCollection { stroke });
-        if (hits.Count == 0) return false;
-        hits.Add(stroke);
-        ink.Strokes.Remove(new StrokeCollection(hits.Where(ink.Strokes.Contains)));
-        return true;
-    }
+    internal bool ScratchOutBy(Stroke stroke) => IsScribble(stroke, Zoom) && EraseUnder(new StrokeCollection { stroke });
 
     internal static bool IsScribble(Stroke stroke, double zoom)
     {
@@ -665,11 +699,12 @@ public sealed partial class OverlayWindow : Window
         FlushSave();
         inkPath = path;
         var strokes = new StrokeCollection();
+        if (path != null) RecoverUnsaved(path);
         if (path != null && File.Exists(path))
         {
             try
             {
-                using var fs = File.OpenRead(path);
+                using var fs = OpenInk(path);
                 strokes = new StrokeCollection(fs);
             }
             catch (Exception e)
@@ -788,26 +823,75 @@ public sealed partial class OverlayWindow : Window
         if (!dirty || inkPath == null) return;
         dirty = false;
         ScheduleIndex();
-        try
+        // Another program can have the file open for a moment (a sync or backup tool): try again shortly
+        // rather than give up until the next stroke, which lost saves. (Not by waiting here: that stalls the pen.)
         {
-            if (ink.Strokes.Count == 0)
+            try
             {
-                if (File.Exists(inkPath)) File.Delete(inkPath);
+                if (ink.Strokes.Count == 0)
+                {
+                    if (File.Exists(inkPath)) File.Delete(inkPath);
+                    if (File.Exists(inkPath + ".tmp")) File.Delete(inkPath + ".tmp");
+                }
+                else
+                {
+                    var tmp = inkPath + ".tmp";
+                    // Save true colours, never the dark-mode display colours.
+                    var toSave = ink.Strokes.Clone();
+                    ToTrueColors(toSave);
+                    using (var fs = File.Create(tmp)) toSave.Save(fs, true);
+                    Native.ReplaceFile(tmp, inkPath);
+                    // Announced only for edits: the plugin syncs announced saves to OneNote.
+                    if (edited) Protocol.Send(new { type = "saved", path = inkPath, strokes = ink.Strokes.Count, edited });
+                    edited = false;
+                }
+                if (saveFailing) Protocol.Log($"saved {Path.GetFileName(inkPath)} after retrying");
+                saveFailing = false;
+                saveDebounce.Interval = TimeSpan.FromMilliseconds(400);
                 return;
             }
-            var tmp = inkPath + ".tmp";
-            // Save true colours, never the dark-mode display colours.
-            var toSave = ink.Strokes.Clone();
-            ToTrueColors(toSave);
-            using (var fs = File.Create(tmp)) toSave.Save(fs, true);
-            File.Move(tmp, inkPath, overwrite: true);
-            // Announced only for edits: the plugin syncs announced saves to OneNote.
-            if (edited) Protocol.Send(new { type = "saved", path = inkPath, strokes = ink.Strokes.Count, edited });
-            edited = false;
+            catch (Exception e)
+            {
+                // Still in use: keep it owed and try again in a couple of seconds (logged once per streak).
+                if (!saveFailing) Protocol.Log($"could not save {inkPath}: {e.Message}; retrying");
+                saveFailing = true;
+                dirty = true;
+                saveDebounce.Stop();
+                saveDebounce.Interval = TimeSpan.FromSeconds(2);
+                saveDebounce.Start();
+                return;
+            }
+        }
+    }
+
+    bool saveFailing;
+
+    /// <summary>
+    /// An ink file opened for reading without getting in a save's way: a save replaces the file (File.Move),
+    /// which fails while anyone has it open without sharing delete.
+    /// </summary>
+    internal static FileStream OpenInk(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    /// <summary>
+    /// A save that wrote its temporary file but couldn't swap it in (the file was in use when the note was
+    /// switched away from, so its retry never came): newer than the ink file, it's the ink to keep. Only
+    /// beside an existing ink file: a leftover with none could be ink since erased (which deletes the file).
+    /// </summary>
+    static void RecoverUnsaved(string path)
+    {
+        var tmp = path + ".tmp";
+        try
+        {
+            if (!File.Exists(tmp) || !File.Exists(path)) return;
+            if (File.GetLastWriteTimeUtc(tmp) <= File.GetLastWriteTimeUtc(path)) { File.Delete(tmp); return; }
+            using (var fs = OpenInk(tmp)) _ = new StrokeCollection(fs); // a complete, readable save
+            Native.ReplaceFile(tmp, path);
+            Protocol.Log($"recovered an unsaved {Path.GetFileName(path)}");
         }
         catch (Exception e)
         {
-            Protocol.Log($"could not save {inkPath}: {e.Message}");
+            Protocol.Log($"could not recover {tmp}: {e.Message}");
         }
     }
 }

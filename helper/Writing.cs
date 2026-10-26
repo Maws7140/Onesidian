@@ -478,7 +478,7 @@ public sealed partial class OverlayWindow
             try
             {
                 StrokeCollection strokes = new();
-                if (File.Exists(path)) { using var fs = File.OpenRead(path); strokes = new StrokeCollection(fs); }
+                if (File.Exists(path)) { using var fs = OverlayWindow.OpenInk(path); strokes = new StrokeCollection(fs); }
                 SendIndex(path, Handwriting.ReadAsync(strokes.ToList(), false).GetAwaiter().GetResult());
             }
             catch (Exception e)
