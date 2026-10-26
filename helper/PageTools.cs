@@ -28,7 +28,6 @@ public sealed partial class OverlayWindow
     Polyline? laserLine;
     DispatcherTimer laserFade = null!;
     Ruler? ruler;
-    internal Ruler? RulerForTest => ruler;
     enum RulerDrag { None, Move, Rotate }
     RulerDrag rulerDrag;
     double rulerGrabAngle;

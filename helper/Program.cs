@@ -164,8 +164,14 @@ public static class Protocol
     }
 }
 
-public static class Program
+public static partial class Program
 {
+    /// <summary>
+    /// Developer self-tests and probes (`--selftest-tools`...): helper/Tests, kept out of the repository. Without
+    /// that folder this is compiled away and the helper is just the helper.
+    /// </summary>
+    static partial void DevCommand(string[] args, ref int? exit);
+
     /// <summary>Exit code asking the plugin to start a fresh helper (e.g. pen input lost after sleep).</summary>
     public const int RestartExitCode = 75;
 
@@ -204,42 +210,12 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--selftest-shapes") return SelfTest.Shapes();
-        if (args.Length > 0 && args[0] == "--onenote-probe") return OneNote.Probe();
-        if (args.Length > 0 && args[0] == "--selftest-onenote-sync") return SelfTestOneNote.Run();
-        if (args.Length > 1 && args[0] == "--onenote-export") return OneNoteExport.ExportFromFile(args[1]);
-        if (args.Length > 1 && args[0] == "--onenote-open") { OneNoteExport.Open(args[1]); return 0; }
-        if (args.Length > 1 && args[0] == "--onenote-ink") return OneNoteExport.InkReport(args[1]);
-        if (args.Length > 1 && args[0] == "--onenote-dump")
-        {
-            OneNote.Connect().GetPageContent(args[1], out var pageXml, 0, OneNote.Xs2013);
-            Console.WriteLine(pageXml);
-            return 0;
-        }
-        if (args.Length > 0 && args[0] == "--selftest-anchors") return SelfTest.Anchors(args.Length > 1 ? args[1] : null);
-        if (args.Length > 0 && args[0] == "--selftest-colors") return SelfTest.Colors(args.Length > 1 ? args[1] : null);
-        if (args.Length > 1 && args[0] == "--read-handwriting") return SelfTest.ReadHandwriting(args[1]);
-        if (args.Length > 1 && args[0] == "--selftest-writing") return SelfTest.Writing(args[1]);
-        if (args.Length > 0 && args[0] == "--math-probe") return SelfTest.MathProbe();
-        if (args.Length > 0 && args[0] == "--math-edit-probe") return SelfTest.MathEditProbe();
-        if (args.Length > 1 && args[0] == "--math-load-check") return SelfTest.MathLoadCheck(args[1]);
-        if (args.Length > 0 && args[0] == "--selftest-mathml") return SelfTest.MathMLConversions();
-        if (args.Length > 0 && args[0] == "--selftest-math") return SelfTest.MathInk();
-        if (args.Length > 0 && args[0] == "--selftest-tools") return SelfTest.Tools();
-        if (args.Length > 1 && args[0] == "--render-pens") return SelfTest.RenderPens(args[1]);
-        if (args.Length > 4 && args[0] == "--repair-shift") return SelfTest.RepairShift(args[1], args[2], args[3], args[4]);
-        if (args.Length > 1 && args[0] == "--dump-ink") return SelfTest.DumpInk(args[1]);
-        if (args.Length > 2 && args[0] == "--compare-svg") return SelfTest.CompareSvg(args[1], args[2]);
-        if (args.Length > 1 && args[0] == "--memory-probe") return SelfTest.MemoryProbe(args[1]);
-        if (args.Length > 0 && args[0] == "--onenote-math-probe") return SelfTestOneNote.MathProbe();
-        if (args.Length > 0 && args[0] == "--onenote-pen-survey") return SelfTestOneNote.PenSurvey(args.Length > 1 ? int.Parse(args[1]) : 300);
-
+        // Copies of this program the helper starts itself: the Fix it math panel, the handwriting reader.
         if (args.Length > 0 && args[0] == "--math-panel") return MathInput.RunPanel();
-        if (args.Length > 0 && args[0] == "--pdf-hit-probe") return SelfTest.PdfHitProbe();
-        if (args.Length > 0 && args[0] == "--scratch-shapes") return SelfTest.ScratchShapes();
-        if (args.Length > 1 && args[0] == "--scratch-probe") return SelfTest.ScratchProbe(args[1]);
-        if (args.Length > 1 && args[0] == "--save-equation") return SelfTest.SaveEquation(args[1]);
         if (args.Length > 1 && args[0] == "--index-files") return OverlayWindow.IndexFiles(args.Skip(1));
+        int? devExit = null;
+        DevCommand(args, ref devExit);
+        if (devExit is int code) return code;
 
         Mark("process");
         // Run at full speed in the background: Windows' efficiency mode throttles windowless background

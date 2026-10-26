@@ -174,12 +174,6 @@ public sealed class MathInput : IDisposable
             dispatcher.InvokeShutdown();
         }, TaskScheduler.FromCurrentSynchronizationContext());
         new System.Threading.Thread(() => { Console.In.ReadToEnd(); dispatcher.BeginInvoke(math.Cancel); }) { IsBackground = true }.Start();
-        // Self-test: press Insert until it answers (it ignores Insert until it has read the ink).
-        if (Environment.GetEnvironmentVariable("ONI_PANEL_TEST") == "insert")
-            _ = Task.Run(async () =>
-            {
-                for (int i = 0; i < 40; i++) { await dispatcher.InvokeAsync(() => PressInsert()); await Task.Delay(300); }
-            });
         System.Windows.Threading.Dispatcher.Run();
         return 0;
     }

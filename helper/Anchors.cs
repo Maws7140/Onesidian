@@ -47,19 +47,6 @@ public sealed partial class OverlayWindow
     internal System.Windows.Controls.InkCanvas Canvas => ink;
     internal DrawingAttributes PenAttributes => ink.DefaultDrawingAttributes;
 
-    /// <summary>Self-tests: place the layer as over Obsidian (here over `window`), and what's under a point.</summary>
-    internal void AttachForTest(IntPtr window) { obsidian = window; Place(); UpdateLayout(); }
-    internal string HitForTest(Point p)
-    {
-        var hit = root.InputHitTest(p) as DependencyObject;
-        var chain = new List<string>();
-        for (var d = hit; d != null && chain.Count < 6; d = VisualTreeHelper.GetParent(d)) chain.Add(d.GetType().Name);
-        return chain.Count == 0 ? "nothing" : string.Join(" < ", chain);
-    }
-    internal string InkGeometryForTest() =>
-        $"ink {ink.ActualWidth:0}x{ink.ActualHeight:0} visible={ink.IsVisible} hitTest={ink.IsHitTestVisible} enabled={ink.IsEnabled} mode={ink.EditingMode} " +
-        $"scale={scale.ScaleX:0.###} translate=({translate.X:0.#},{translate.Y:0.#}) root {root.ActualWidth:0}x{root.ActualHeight:0} clip={(root.Clip == null ? "none" : root.Clip.Bounds.ToString())} " +
-        $"window {ActualWidth:0}x{ActualHeight:0} armed={armed} bg={root.Background}";
 
     static bool TryGetAnchor(Stroke s, out int line, out double top)
     {

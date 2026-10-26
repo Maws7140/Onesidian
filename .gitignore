@@ -5,3 +5,7 @@ helper/obj/
 helper/publish/
 *.ink.tmp
 harness/
+
+# Self-tests, probes, test data and the testing checklist stay local
+helper/Tests/
+TESTING.md
