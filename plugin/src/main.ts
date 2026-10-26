@@ -1215,7 +1215,7 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
   private sync() {
     const target = this.activeInkView();
     // Notes (folders, tags, a property) set to go without some of this: see ignoreFor.
-    const ignored = this.ignoreFor(target?.view.file ?? null);
+    const ignored = this.shownIgnored(target?.view ?? null);
     const inkOn = this.enabled && !ignored.ink;
     this.mountToolbar(ignored.toolbar ? null : target?.view ?? null);
 
@@ -1277,6 +1277,31 @@ export default class OneNoteInkPlugin extends Plugin implements ToolbarHost, Mat
   }
 
   private ignoreCache = new Map<string, Ignored>();
+  /** The note whose rules are on screen, and those rules (see shownIgnored). */
+  private shownFile = "";
+  private shownRules: Ignored = NOT_IGNORED;
+  private switchingTo = "";
+  private switchingSince = 0;
+
+  /**
+   * The rules for what's on screen. Opening a note, Obsidian names the new file a moment before it shows
+   * its text, so for that moment the old note got the new one's lines and toolbar (a note without lines
+   * flashed them). A note's rules apply once its text is showing; until then, the last note's stay.
+   */
+  private shownIgnored(view: FileView | null): Ignored {
+    const file = view?.file ?? null;
+    if (!file) return NOT_IGNORED;
+    if (file.path !== this.shownFile) {
+      if (this.switchingTo !== file.path) { this.switchingTo = file.path; this.switchingSince = performance.now(); }
+      // (After a second and a half they apply anyway: a note whose text never matches its file on disk.)
+      const waiting = view instanceof MarkdownView && performance.now() - this.switchingSince < 1500
+        && !this.showsFile(view, view.editor?.getValue() ?? "");
+      if (waiting) return this.shownRules;
+      this.shownFile = file.path;
+    }
+    this.shownRules = this.ignoreFor(file);
+    return this.shownRules;
+  }
 
   /** What this file goes without (rule lines, toolbar, ink layer), from the ignore settings. Cached per file. */
   ignoreFor(file: TFile | null): Ignored {
