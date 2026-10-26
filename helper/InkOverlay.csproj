@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 10 SDK target gives us WinRT's InkAnalyzer for ink-to-shape. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>InkOverlay</AssemblyName>
+    <RootNamespace>InkOverlay</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <!-- Precompiled, so it starts fast: the helper is relaunched on wake and after a lost pen. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+</Project>

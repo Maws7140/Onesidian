@@ -1,0 +1,7 @@
+node_modules/
+plugin/main.js
+helper/bin/
+helper/obj/
+helper/publish/
+*.ink.tmp
+harness/

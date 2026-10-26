@@ -1,0 +1,25 @@
+{
+  "name": "onenote-ink",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Windows Ink layer on top of Obsidian notes, saved in OneNote's ink format.",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs",
+    "install-vault": "node install.mjs"
+  },
+  "author": "Lilly",
+  "license": "MIT",
+  "devDependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^5.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "^1.8.7",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "nerdamer-prime": "1.5.0"
+  }
+}

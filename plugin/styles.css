@@ -1,0 +1,475 @@
+/*
+ * OneNote Ink. Everything here leans on Obsidian's own components and variables
+ * (clickable-icon, Menu, .slider, inputs) so the toolbar looks like the rest of the user's theme.
+ */
+
+/* ---------- Page ---------- */
+
+/* Blank page below the text so the note is as tall as its ink. Height is set per note by the plugin. */
+.oni-grow::after {
+  content: "";
+  display: block;
+  flex-shrink: 0;
+  height: var(--oni-ink-space, 0px);
+  pointer-events: none;
+}
+
+/* Notebook rule lines; pitch and phase follow the body text (set by the plugin). */
+.oni-ruled {
+  --oni-rule-color: color-mix(in srgb, var(--text-faint) 45%, transparent);
+  background-image: linear-gradient(to bottom, transparent calc(100% - 1px), var(--oni-rule-color) calc(100% - 1px));
+  background-size: 100% var(--oni-rule-pitch, 24px);
+  background-position: 0 var(--oni-rule-phase, 0px);
+  background-repeat: repeat-y;
+}
+
+/* Grid lines: the same pitch across and down. */
+.oni-grid {
+  --oni-rule-color: color-mix(in srgb, var(--text-faint) 35%, transparent);
+  background-image:
+    linear-gradient(to bottom, transparent calc(100% - 1px), var(--oni-rule-color) calc(100% - 1px)),
+    linear-gradient(to right, transparent calc(100% - 1px), var(--oni-rule-color) calc(100% - 1px));
+  background-size: var(--oni-rule-pitch, 24px) var(--oni-rule-pitch, 24px);
+  background-position: 0 var(--oni-rule-phase, 0px);
+}
+
+/* Effect pens in the pen popover. */
+.oni-effects .oni-effect.is-active {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+/* ---------- Toolbar ---------- */
+
+.oni-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  height: var(--header-height);
+  padding: 0 var(--size-4-3);
+  border-bottom: var(--border-width) solid var(--divider-color);
+  background-color: var(--background-primary);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+
+.oni-toolbar.is-off .oni-pen,
+.oni-toolbar.is-off .oni-add {
+  opacity: 0.5;
+}
+
+.oni-btn.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.oni-btn.is-disabled:hover {
+  background-color: transparent;
+}
+
+.oni-divider {
+  flex-shrink: 0;
+  width: var(--border-width);
+  height: var(--size-4-4);
+  margin: 0 var(--size-4-1);
+  background-color: var(--divider-color);
+}
+
+.oni-right {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: auto;
+  padding-left: var(--size-4-2);
+}
+
+/* Pen: the icon with a colour bar underneath, like Office's font colour button. */
+.oni-pen,
+.oni-restyle {
+  position: relative;
+  padding-bottom: var(--size-4-2);
+}
+
+.oni-color-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 14px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  box-shadow: 0 0 0 var(--border-width) var(--background-modifier-border);
+}
+
+/* ---------- Pen popover (styled like an Obsidian menu) ---------- */
+
+.oni-popover {
+  position: fixed;
+  z-index: var(--layer-menu);
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  background-color: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border-hover);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+}
+
+.oni-pop-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-1);
+}
+
+.oni-size-value {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.oni-popover .oni-size {
+  width: 100%;
+}
+
+/* Stroke preview on the note's own background, since that's what the ink sits on. */
+.oni-preview {
+  display: block;
+  width: 100%;
+  height: 36px;
+  background-color: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.oni-swatches {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: var(--size-2-2);
+}
+
+.oni-recent {
+  padding-top: var(--size-4-2);
+  border-top: var(--border-width) solid var(--background-modifier-border);
+}
+
+.oni-recent:empty {
+  display: none;
+}
+
+.oni-chip {
+  aspect-ratio: 1;
+  border-radius: var(--radius-s);
+  box-shadow: inset 0 0 0 var(--border-width) var(--background-modifier-border-hover);
+  cursor: var(--cursor);
+}
+
+.oni-chip:hover {
+  box-shadow: inset 0 0 0 2px var(--text-muted);
+}
+
+.oni-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.oni-pop-foot input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+}
+
+/* ---------- Pull from OneNote: the list of text changes ---------- */
+
+.oni-changes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: var(--size-4-3);
+}
+
+.oni-change-kind {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: var(--size-2-1);
+}
+
+.oni-change pre {
+  margin: 0;
+  padding: var(--size-2-2) var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+}
+
+.oni-change-old {
+  background-color: rgba(var(--color-red-rgb), 0.12);
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.oni-change-new {
+  background-color: rgba(var(--color-green-rgb), 0.12);
+}
+
+/* ---------- Colour wheel ---------- */
+
+.oni-wheel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.oni-wheel-disc {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.oni-wheel-disc canvas {
+  display: block;
+  border-radius: 50%;
+}
+
+.oni-wheel-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* Brightness needs a gradient track, so it can't be the stock slider; keep it as plain as one. */
+.oni-brightness {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: var(--size-2-2) 0;
+  border-radius: 3px;
+  background: linear-gradient(to right, #000, var(--oni-bright-top, #fff));
+  box-shadow: 0 0 0 var(--border-width) var(--background-modifier-border-hover);
+  touch-action: none;
+}
+
+.oni-brightness::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  cursor: var(--cursor);
+}
+
+/* Search handwriting: where each match is. */
+.oni-search-where {
+  color: var(--text-muted);
+}
+
+/* ---------- Math pane ---------- */
+.oni-math {
+  padding: var(--size-4-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+.oni-math-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.oni-math-title {
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-medium);
+}
+.oni-math-card,
+.oni-math-result,
+.oni-math-quiz {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+.oni-math-card {
+  padding: var(--size-4-3);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+.oni-math-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.oni-math-problem,
+.oni-math-answer {
+  overflow-x: auto;
+}
+.oni-math-answer {
+  font-size: 1.1em;
+}
+.oni-math-approx,
+.oni-math-note,
+.oni-math-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.oni-math-error {
+  color: var(--text-error);
+}
+.oni-math-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  align-items: center;
+}
+.oni-math-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+.oni-math-button-icon {
+  display: inline-flex;
+}
+.oni-math-button-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+.oni-math-action {
+  width: 100%;
+}
+.oni-math-input {
+  width: 100%;
+  font-family: var(--font-monospace);
+  resize: vertical;
+}
+.oni-math-count {
+  width: 4em;
+}
+.oni-math-steps {
+  margin: 0;
+  padding-inline-start: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+.oni-math-step-text p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.oni-math-step-math {
+  overflow-x: auto;
+}
+
+/* ---------- graphs ---------- */
+.oni-graph {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  margin: var(--size-4-2) 0;
+}
+.oni-graph-stage {
+  position: relative;
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.oni-graph-stage canvas {
+  display: block;
+  cursor: grab;
+}
+.oni-graph-zoom {
+  position: absolute;
+  top: var(--size-4-1);
+  right: var(--size-4-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--background-primary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+.oni-graph-tip {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  border: var(--border-width) solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+.oni-graph-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  font-size: var(--font-ui-small);
+}
+.oni-graph-legend,
+.oni-graph-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-3) var(--size-4-3);
+}
+.oni-graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  font-family: var(--font-monospace);
+}
+.oni-graph-swatch {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+.oni-graph-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+.oni-graph-param {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+.oni-graph-param-name {
+  font-family: var(--font-monospace);
+  min-width: 1.5em;
+}
+.oni-graph-param input {
+  flex: 1;
+}
+.oni-graph-param-value {
+  min-width: 3em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.oni-graph-error {
+  color: var(--text-error);
+}
+
+/* The note's own copy of its ink (drawn in the page so it scrolls with the text; see domink.ts). */
+.oni-ink-host {
+  position: relative;
+}
+.oni-ink-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 5;
+}
